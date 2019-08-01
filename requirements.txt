@@ -1,0 +1,8 @@
+argparse
+glob3
+h5py
+keras
+matplotlib
+music21
+numpy
+tensorflow
