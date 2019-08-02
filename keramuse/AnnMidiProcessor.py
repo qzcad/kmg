@@ -47,22 +47,22 @@ class AnnMidiProcessor:
                         self.notes.append(str(element.pitch))
                         self.durations.append(element.quarterLength)
                         self.velocities.append(element.volume.velocityScalar if element.volume.velocityScalar is not None else 0)
-                        print("Note: {}, Velocity: {}, Duration: {}".format(str(element.pitch),
-                                                                            element.volume.velocityScalar,
-                                                                            element.quarterLength))
+                        # print("Note: {}, Velocity: {}, Duration: {}".format(str(element.pitch),
+                        #                                                     element.volume.velocityScalar,
+                        #                                                     element.quarterLength))
                     elif isinstance(element, chord.Chord):
                         # get's the normal order (numerical representation) of the chord
                         self.notes.append('.'.join(str(n) for n in element.normalOrder))
                         self.durations.append(element.quarterLength)
                         self.velocities.append(element.volume.velocityScalar if element.volume.velocityScalar is not None else 0)
-                        print("Chord: {}, Velocity: {}, Duration: {}".format(
-                            '.'.join(str(n) for n in element.normalOrder),
-                            element.volume.velocityScalar, element.quarterLength))
+                        # print("Chord: {}, Velocity: {}, Duration: {}".format(
+                        #     '.'.join(str(n) for n in element.normalOrder),
+                        #     element.volume.velocityScalar, element.quarterLength))
                     else:
                         self.notes.append('R')
                         self.durations.append(element.quarterLength)
                         self.velocities.append(0)
-                        print("Rest. Velocity: {}, Duration: {}".format(0, element.quarterLength))
+                        # print("Rest. Velocity: {}, Duration: {}".format(0, element.quarterLength))
 
                 print("Song {} {} Loaded".format(i + 1, file.__str__()))
                 loaded += 1
@@ -76,11 +76,11 @@ class AnnMidiProcessor:
         self.pitches = sorted(set(item for item in self.notes))
         self.fractions = sorted(set(item for item in self.durations)) # update of possible fractions
         print("Number of pitches: {}".format(len(self.pitches)))
-        print(self.pitches)
+        # print(self.pitches)
         print("Number of notes: {}. Number of durations: {}. Number of velocities: {}.".format(len(self.notes), len(self.durations), len(self.velocities)))
-        print(self.notes)
-        print(self.durations)
-        print(self.velocities)
+        # print(self.notes)
+        # print(self.durations)
+        # print(self.velocities)
 
     def construct_sequences(self):
         """
