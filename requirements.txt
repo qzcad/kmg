@@ -6,3 +6,4 @@ matplotlib
 music21
 numpy
 tensorflow
+tqdm

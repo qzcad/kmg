@@ -3,6 +3,7 @@ import glob
 import numpy as np
 from keras.models import Sequential, model_from_json
 from keras.layers import Dense, LSTM, Dropout, Activation
+from tqdm import tqdm
 
 
 class AnnMidiProcessor:
@@ -35,7 +36,7 @@ class AnnMidiProcessor:
 
     def load_midi(self, max_midis=0, music_dir='music'):
         loaded = 0
-        for i, file in enumerate(glob.glob("{}/*.mid".format(music_dir))):
+        for i, file in tqdm(enumerate(glob.glob("{}/*.mid".format(music_dir)))):
             try:
                 midi = converter.parse(file)
                 midi = midi[self.track]
@@ -112,7 +113,8 @@ class AnnMidiProcessor:
         #     output_notes[i][self.note_dict[output_note]] = self.durations[self.note_dict[output_note]]
         input_notes = np.zeros((num_training, self.sequence_length, 3))
         output_notes = np.zeros((num_training, 3))
-        for i in range(0, num_training):
+        max_duration = max(self.durations)
+        for i in tqdm(range(0, num_training)):
             # Here, i is the training example, j is the note in the sequence for a specific training example
             input_sequence_of_notes = self.notes[i: i + self.sequence_length]
             input_sequence_of_durations = self.durations[i: i + self.sequence_length]
@@ -125,7 +127,7 @@ class AnnMidiProcessor:
                 input_notes[i][j][1] = input_sequence_of_durations[j] / max(self.durations)
                 input_notes[i][j][2] = input_sequence_of_velocities[j]
             output_notes[i][0] = self.note_dict[output_note] / (self.vocab_length - 1)
-            output_notes[i][1] = output_duration / max(self.durations)
+            output_notes[i][1] = output_duration / max_duration
             output_notes[i][2] = output_velocity
 
         return input_notes, output_notes
