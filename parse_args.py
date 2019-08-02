@@ -41,4 +41,5 @@ def parse_args():
                         help='A name of a file to store generated midi. Type: str. Default: rnn_music.')
     parser.add_argument('--midis', type=int, nargs='?', default=10,
                         help='A number of generated midi-files. Type: int. Default: 1')
+    parser.add_argument("-p", "--plot", action="store_true", help="Plot accuracy and loss of the model.")
     return parser.parse_args()
