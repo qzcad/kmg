@@ -26,7 +26,8 @@ if args.plot:
     plt.legend()
     plt.show()
 
-amp.save_model()
+amp.save_model(input_notes, output_notes)
+
 if args.midis > 1:
     for i in range(args.midis):
         amp.generate_midi(input_notes, notes_nb=args.notes, destination='{}{}'.format(args.destination, i+1),

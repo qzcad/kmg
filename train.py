@@ -26,4 +26,4 @@ if args.plot:
     plt.legend()
     plt.show()
 
-amp.save_model()
+amp.save_model(input_notes, output_notes)

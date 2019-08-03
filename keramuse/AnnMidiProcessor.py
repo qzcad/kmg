@@ -4,6 +4,7 @@ import numpy as np
 from keras.models import Sequential, model_from_json
 from keras.layers import Dense, LSTM, Dropout, Activation
 from tqdm import tqdm
+import pickle
 
 
 class AnnMidiProcessor:
@@ -250,14 +251,20 @@ class AnnMidiProcessor:
 
         midi_stream.write('midi', fp="output/{}.mid".format(destination))
 
-    def save_model(self, file_name="model/model"):
+    def save_model(self, input_notes, output_notes, file_name="model/model"):
         # serialize model to JSON
         model_json = self.model.to_json()
         with open(file_name + ".json", "w") as json_file:
             json_file.write(model_json)
         # serialize weights to HDF5
         self.model.save_weights(file_name + ".h5")
-        print("ANN model is saved to disk: {} {}".format(file_name + ".json", file_name + ".h5"))
+        np.save(file_name + "_input", input_notes)
+        np.save(file_name + "_output", output_notes)
+        self.save_obj(self.pitches, 'pitches')
+        self.save_obj(self.fractions, 'fractions')
+        self.save_obj(self.durations, 'durations')
+        print("ANN model is saved to disk: {} {} {} {}".format(file_name + ".json", file_name + ".h5",
+                                                               file_name + ".input", file_name + ".output"))
 
     def load_model(self, file_name="model/model", loss='mean_squared_error',
                    metrics=['acc'], opt='rmsprop'):
@@ -269,7 +276,20 @@ class AnnMidiProcessor:
         # load weights into new model
         self.model.load_weights(file_name + ".h5")
         self.model.compile(loss=loss, optimizer=opt, metrics=metrics)
-        print("ANN model is loaded from disk: {} {}".format(file_name + ".json", file_name + ".h5"))
+        input_notes = np.load(file_name + "_input.npy")
+        output_notes = np.load(file_name + "_output.npy")
+
+        self.pitches = self.load_obj('pitches')
+        self.fractions = self.load_obj('fractions')
+        self.durations = self.load_obj('durations')
+        for i, note in enumerate(self.pitches):
+            self.note_dict[note] = i
+
+        self.vocab_length = len(self.pitches)
+
+        print("ANN model is loaded from disk: {} {} {} {}".format(file_name + ".json", file_name + ".h5",
+                                                                  file_name + ".input", file_name + ".output"))
+        return input_notes, output_notes
 
     @staticmethod
     def get_closest_value(arr, target):
@@ -299,3 +319,13 @@ class AnnMidiProcessor:
             return arr[mid] if target - arr[mid - 1] >= arr[mid] - target else arr[mid - 1]
         else:
             return arr[mid + 1] if target - arr[mid] >= arr[mid + 1] - target else arr[mid]
+
+    @staticmethod
+    def save_obj(obj, name):
+        with open('model/' + name + '.pkl', 'wb') as f:
+            pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+
+    @staticmethod
+    def load_obj(name):
+        with open('model/' + name + '.pkl', 'rb') as f:
+            return pickle.load(f)

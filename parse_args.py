@@ -39,7 +39,7 @@ def parse_args():
                         help='A number of epochs to train the model. Type: int. Default: 400.')
     parser.add_argument('--destination', type=str, nargs='?', default='rnn_music',
                         help='A name of a file to store generated midi. Type: str. Default: rnn_music.')
-    parser.add_argument('--midis', type=int, nargs='?', default=10,
+    parser.add_argument('--midis', type=int, nargs='?', default=1,
                         help='A number of generated midi-files. Type: int. Default: 1')
     parser.add_argument("-p", "--plot", action="store_true", help="Plot accuracy and loss of the model.")
     return parser.parse_args()
