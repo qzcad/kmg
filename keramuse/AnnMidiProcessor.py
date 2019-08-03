@@ -168,6 +168,7 @@ class AnnMidiProcessor:
         start_sequence = sequence.reshape(1, self.sequence_length, 3)
         # print(start_sequence)
         output = []
+
         # Let's generate a song of notes_nb notes
         for i in range(0, notes_nb):
             new_note = self.model.predict(start_sequence, verbose=0)
@@ -187,7 +188,7 @@ class AnnMidiProcessor:
         # Now output is populated with notes in their string form
         # for element in output:
         #     print(element)
-
+        max_duration = max(self.durations)
         final_notes = []
         final_durations = []
         final_velocities = []
@@ -197,8 +198,7 @@ class AnnMidiProcessor:
             # final_notes.append(backward_dict[index])
             # final_durations.append(self.get_closest_value(self.fractions, np.max(list(element))))
             final_notes.append(backward_dict[round(element[0] * (self.vocab_length - 1))])
-            final_durations.append(self.get_closest_value(arr=self.fractions,
-                                                          target=(element[1] * max(self.durations))))
+            final_durations.append(self.get_closest_value(arr=self.fractions, target=(element[1] * max_duration)))
             final_velocities.append(element[2])
 
         print("File: output/{}.mid: ".format(destination))
@@ -282,6 +282,7 @@ class AnnMidiProcessor:
         self.pitches = self.load_obj('pitches')
         self.fractions = self.load_obj('fractions')
         self.durations = self.load_obj('durations')
+        print(self.fractions)
         for i, note in enumerate(self.pitches):
             self.note_dict[note] = i
 

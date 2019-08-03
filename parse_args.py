@@ -10,7 +10,7 @@ def parse_args():
                              'Type: str. Default: Piano.')
     parser.add_argument('--notes', type=int, nargs='?', default=16,
                         help='A number of notes to generate at one midi-file. Type: int. Default: 16.')
-    parser.add_argument('--bars', type=int, nargs='?', default=2,
+    parser.add_argument('--bars', type=int, nargs='?', default=0,
                         help='A number of bars. If bars > 0 than durations is mapped on 4*bars interval.'
                              ' Type: int. Default: 0.')
     parser.add_argument('--track', type=int, nargs='?', default=0,
