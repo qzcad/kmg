@@ -2,36 +2,42 @@ from keramuse.AnnMidiProcessor import AnnMidiProcessor
 import matplotlib.pyplot as plt
 from parse_args import parse_args
 
+
+def plot_history(history, metric='loss', title='Model Loss', xlabel='epoch', ylabel='loss'):
+    plt.plot(history.history[metric])
+    plt.title(title)
+    plt.ylabel(ylabel)
+    plt.xlabel(xlabel)
+    plt.show()
+
+
 args = parse_args()
 
 amp = AnnMidiProcessor(track=args.track, sequence_length=args.sequence_length)
 amp.load_midi(max_midis=args.max_midis, music_dir=args.music_dir)
-input_notes, output_notes = amp.construct_sequences()
-# print(input_notes)
-# print(output_notes)
-amp.make_model(units=args.units, rate=args.rate, activation=args.activation, loss=args.loss, opt=args.opt)
-history = amp.train_model(input_notes, output_notes, batch_size=args.batch_size, nb_epoch=args.nb_epoch)
+amp.construct_sequences()
+durations_history, offsets_history, notes_history, velocities_history = amp.train(units=args.units, rate=args.rate,
+                                                                                  activation=args.activation,
+                                                                                  loss=args.loss, opt=args.opt,
+                                                                                  batch_size=args.batch_size,
+                                                                                  nb_epoch=args.nb_epoch)
 
-if args.plot:
-    plt.plot(history.history['acc'], label='train')
-    plt.title('model accuracy')
-    plt.ylabel('accuracy')
-    plt.xlabel('epoch')
-    plt.legend()
-    plt.show()
-    plt.plot(history.history['loss'], label='loss')
-    plt.title('model loss')
-    plt.ylabel('loss')
-    plt.xlabel('epoch')
-    plt.legend()
-    plt.show()
+if not args.plot:
+    plot_history(notes_history, title='Notes Model Loss')
+    plot_history(notes_history, metric='acc', title='Notes Model Accuracy', ylabel='accuracy')
+    plot_history(durations_history, title='Durations Model Loss')
+    plot_history(durations_history, metric='acc', title='Durations Model Accuracy', ylabel='accuracy')
+    plot_history(offsets_history, title='Offsets Model Loss')
+    plot_history(offsets_history, metric='acc', title='Offsets Model Accuracy', ylabel='accuracy')
+    plot_history(velocities_history, title='Velocities Model Loss')
+    plot_history(velocities_history, metric='acc', title='Velocities Model Accuracy', ylabel='accuracy')
 
-amp.save_model(input_notes, output_notes)
+amp.save_model()
 
 if args.midis > 1:
     for i in range(args.midis):
-        amp.generate_midi(input_notes, notes_nb=args.notes, destination='{}{}'.format(args.destination, i+1),
+        amp.generate_midi(notes_nb=args.notes, destination='{}{}'.format(args.destination, i+1),
                           instrumentName=args.instrument, bars=args.bars)
 else:
-    amp.generate_midi(input_notes, notes_nb=args.notes, destination=args.destination, instrumentName=args.instrument,
+    amp.generate_midi(notes_nb=args.notes, destination=args.destination, instrumentName=args.instrument,
                       bars=args.bars)

@@ -21,9 +21,9 @@ def parse_args():
                         help='The limit of the count of processed files. '
                              'If less or equal 0 then the count of processed files is unlimited. '
                              'Type: int. Default: 0.')
-    parser.add_argument('--units', type=int, nargs='?', default=256,
+    parser.add_argument('--units', type=int, nargs='?', default=512,
                         help='Positive integer, dimensionality of the output space in LSTM layers.'
-                             'Type: int. Default: 256.')
+                             'Type: int. Default: 512.')
     parser.add_argument('--rate', type=float, nargs='?', default=0.2,
                         help='Fraction of the input units to drop. Type: float between 0 and 1. Default: 0.2.')
     parser.add_argument('--activation', type=str, nargs='?', default='sigmoid',
@@ -35,8 +35,8 @@ def parse_args():
                         help='An optimizer. See https://keras.io/optimizers/. Type: str. Default: rmsprop.')
     parser.add_argument('--batch_size', type=int, nargs='?', default=4,
                         help='A number of training examples in one forward/backward pass. Type: int. Default: 4.')
-    parser.add_argument('--nb_epoch', type=int, nargs='?', default=400,
-                        help='A number of epochs to train the model. Type: int. Default: 400.')
+    parser.add_argument('--nb_epoch', type=int, nargs='?', default=300,
+                        help='A number of epochs to train the model. Type: int. Default: 300.')
     parser.add_argument('--destination', type=str, nargs='?', default='rnn_music',
                         help='A name of a file to store generated midi. Type: str. Default: rnn_music.')
     parser.add_argument('--midis', type=int, nargs='?', default=1,

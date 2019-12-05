@@ -5,6 +5,7 @@ from keras.models import Sequential, model_from_json
 from keras.layers import Dense, LSTM, Dropout, Activation
 from tqdm import tqdm
 import pickle
+import os
 
 
 class AnnMidiProcessor:
@@ -12,31 +13,25 @@ class AnnMidiProcessor:
         self.notes = []
         self.durations = []
         self.velocities = []
+        self.offsets = []
+        self.positions = []
         # There are multiple tracks in the MIDI file, so we'll use the first one
         self.track = track
-        self.pitches = None
         self.sequence_length = sequence_length
-        self.note_dict = dict()
-        self.vocab_length = 0
-        self.model = None
-        self.fractions = [1/256, 3/512, 7/1024, 15/2048,
-                          1/128, 3/256, 7/512, 15/1024,
-                          1/64, 3/128, 7/256, 15/512,
-                          1/32, 3/64, 7/128, 15/256,
-                          1/16, 3/32, 7/64, 15/128,
-                          1/8, 3/16, 7/32, 15/64,
-                          1/4, 3/8, 7/16, 15/32,
-                          1/2, 3/4, 7/8, 15/16,
-                          1, 3/2, 7/4, 15/8,
-                          2, 3, 7/2, 15/4,
-                          4, 6, 7, 15/2,
-                          8, 12, 14, 15]
+
+        self.notes_model = None
+        self.durations_model = None
+        self.offsets_model = None
+        self.velocities_model = None
+
         print('ANN music generation utility')
         print("Track: {}".format(self.track))
         print("Length of a sequence: {}".format(self.sequence_length))
 
     def load_midi(self, max_midis=0, music_dir='music'):
         loaded = 0
+        position = 0
+
         for i, file in tqdm(enumerate(glob.glob("{}/*.mid".format(music_dir)))):
             try:
                 midi = converter.parse(file)
@@ -44,27 +39,40 @@ class AnnMidiProcessor:
                 notes_to_parse = None
                 # Parse the midi file by the notes it contains
                 notes_to_parse = midi.flat.notesAndRests
+                if len(notes_to_parse) > 0:
+                    # append position of a new melody in the notes list
+                    self.positions.append(position)
+                total_offset = 0
                 for element in notes_to_parse:
                     if isinstance(element, note.Note):
                         self.notes.append(str(element.pitch))
                         self.durations.append(element.quarterLength)
-                        self.velocities.append(element.volume.velocityScalar if element.volume.velocityScalar is not None else 0)
-                        # print("Note: {}, Velocity: {}, Duration: {}".format(str(element.pitch),
-                        #                                                     element.volume.velocityScalar,
-                        #                                                     element.quarterLength))
+                        self.velocities.append(element.volume.velocity if element.volume.velocity is not None else 0)
+                        self.offsets.append(element.offset - total_offset)
+                        total_offset += element.offset - total_offset
+                        # print("Note: {}, Velocity: {}, Duration: {}, Offset: {}".format(str(element.pitch),
+                        #                                                                 element.volume.velocity,
+                        #                                                                 element.quarterLength,
+                        #                                                                 element.offset))
                     elif isinstance(element, chord.Chord):
                         # get's the normal order (numerical representation) of the chord
                         self.notes.append('.'.join(str(n) for n in element.normalOrder))
                         self.durations.append(element.quarterLength)
-                        self.velocities.append(element.volume.velocityScalar if element.volume.velocityScalar is not None else 0)
-                        # print("Chord: {}, Velocity: {}, Duration: {}".format(
+                        self.velocities.append(element.volume.velocity if element.volume.velocity is not None else 0)
+                        self.offsets.append(element.offset - total_offset)
+                        total_offset += element.offset - total_offset
+                        # print("Chord: {}, Velocity: {}, Duration: {}, Offset: {}".format(
                         #     '.'.join(str(n) for n in element.normalOrder),
-                        #     element.volume.velocityScalar, element.quarterLength))
+                        #     element.volume.velocity, element.quarterLength, element.offset))
                     else:
                         self.notes.append('R')
                         self.durations.append(element.quarterLength)
                         self.velocities.append(0)
-                        # print("Rest. Velocity: {}, Duration: {}".format(0, element.quarterLength))
+                        self.offsets.append(element.offset - total_offset)
+                        total_offset += element.offset - total_offset
+                        # print("Rest. Velocity: {}, Duration: {}, Offset: {}".format(0, element.quarterLength, element.offset))
+
+                    position += 1
 
                 print("Song {} {} Loaded".format(i + 1, file.__str__()))
                 loaded += 1
@@ -74,146 +82,195 @@ class AnnMidiProcessor:
                 print("{}: broken song format, message: {} ".format(file.__str__(), Exception))
 
         print("DONE LOADING SONGS. {} songs are correctly loaded".format(loaded))
-        # Get all pitch names
-        self.pitches = sorted(set(item for item in self.notes))
-        self.fractions = sorted(set(item for item in self.durations)) # update of possible fractions
-        print("Number of pitches: {}".format(len(self.pitches)))
-        # print(self.pitches)
-        print("Number of notes: {}. Number of durations: {}. Number of velocities: {}.".format(len(self.notes), len(self.durations), len(self.velocities)))
-        # print(self.notes)
-        # print(self.durations)
-        # print(self.velocities)
+        print("Notes len is {}, Durations len is {}, Offsets len is {}, Velocities len is {}".format(len(self.notes),
+                                                                                                     len(
+                                                                                                         self.durations),
+                                                                                                     len(self.offsets),
+                                                                                                     len(
+                                                                                                         self.velocities)))
+        print(self.notes)
+
+    @staticmethod
+    def __dict_from_list__(l):
+        unique = sorted(set(l))
+        return {unique[i]: i for i in range(0, len(unique))}
+
+    @staticmethod
+    def __backward_dict_from_list__(l):
+        unique = sorted(set(l))
+        return {i: unique[i] for i in range(0, len(unique))}
+
+    @staticmethod
+    def __construct_sequences__(
+            values,
+            sequence_length
+    ):
+        number_of_values = len(values)
+        values_dict = AnnMidiProcessor.__dict_from_list__(values)
+        number_training = number_of_values - sequence_length
+        input = np.zeros((number_training, sequence_length, len(values_dict)))
+        output = np.zeros((number_training, len(values_dict)))
+        for i in range(0, number_training):
+            # onehot encoding of pitches
+            # Here, i is the training example, j is the value in the sequence for a specific training example
+            input_sequence = values[i: i + sequence_length]
+            output_value = values[i + sequence_length]
+
+            for j, v in enumerate(input_sequence):
+                input[i][j][values_dict[v]] = 1
+
+            output[i][values_dict[output_value]] = 1
+
+        return input, output
 
     def construct_sequences(self):
-        """
-        Now we must get these notes in a usable form for our LSTM.
-        Let's construct sequences that can be grouped together to predict the next note in groups of 10 notes.
-        Let's use One Hot Encoding for each of the notes and create an array as such of sequences.
-        :return:
-        """
-        # Let's first assign an index to each of the possible notes
-        for i, note in enumerate(self.pitches):
-            self.note_dict[note] = i
-        # Now let's construct sequences.
-        # Taking each note and encoding it as a numpy array with a 1 in the position of the note it has
-        number_notes = len(self.notes)
-        self.vocab_length = len(self.pitches)
-        # Lets make a numpy array with the number of training examples, sequence length,
-        # and the length of the one-hot-encoding
-        num_training = number_notes - self.sequence_length
-        print("Number of notes: {};\tLength of a sequence: {};\tNumber of training examples: {}".
-              format(number_notes, self.sequence_length, num_training))
-        # input_notes = np.zeros((num_training, self.sequence_length, self.vocab_length))
-        # output_notes = np.zeros((num_training, self.vocab_length))
-        # for i in range(0, num_training):
-        #     # Here, i is the training example, j is the note in the sequence for a specific training example
-        #     input_sequence = self.notes[i: i + self.sequence_length]
-        #     output_note = self.notes[i + self.sequence_length]
-        #     for j, note in enumerate(input_sequence):
-        #         input_notes[i][j][self.note_dict[note]] = self.durations[self.note_dict[note]]
-        #     output_notes[i][self.note_dict[output_note]] = self.durations[self.note_dict[output_note]]
-        input_notes = np.zeros((num_training, self.sequence_length, 3))
-        output_notes = np.zeros((num_training, 3))
-        max_duration = max(self.durations)
-        for i in tqdm(range(0, num_training)):
-            # Here, i is the training example, j is the note in the sequence for a specific training example
-            input_sequence_of_notes = self.notes[i: i + self.sequence_length]
-            input_sequence_of_durations = self.durations[i: i + self.sequence_length]
-            input_sequence_of_velocities = self.velocities[i: i + self.sequence_length]
-            output_note = self.notes[i + self.sequence_length]
-            output_duration = self.durations[i + self.sequence_length]
-            output_velocity = self.velocities[i + self.sequence_length]
-            for j, note in enumerate(input_sequence_of_notes):
-                input_notes[i][j][0] = self.note_dict[note] / (self.vocab_length - 1)
-                input_notes[i][j][1] = input_sequence_of_durations[j] / max(self.durations)
-                input_notes[i][j][2] = input_sequence_of_velocities[j]
-            output_notes[i][0] = self.note_dict[output_note] / (self.vocab_length - 1)
-            output_notes[i][1] = output_duration / max_duration
-            output_notes[i][2] = output_velocity
+        self.input_notes, self.output_notes = self.__construct_sequences__(self.notes, self.sequence_length)
+        self.input_durations, self.output_durations = self.__construct_sequences__(self.durations, self.sequence_length)
+        self.input_offsets, self.output_offsets = self.__construct_sequences__(self.offsets, self.sequence_length)
+        self.input_velocites, self.output_velocities = self.__construct_sequences__(self.velocities,
+                                                                                    self.sequence_length)
 
-        return input_notes, output_notes
+    @staticmethod
+    def __lstm__(
+            sequence_length,
+            vocab_length,
+            units=256,
+            rate=0.2,
+            activation='softmax',
+            loss='categorical_crossentropy',
+            metrics=['acc'],
+            opt='rmsprop'
+    ):
+        model = Sequential()
+        model.add(LSTM(units, return_sequences=True, input_shape=(sequence_length, vocab_length)))
+        model.add(Dropout(rate))
+        model.add(LSTM(units, return_sequences=False))
+        model.add(Dropout(rate))
+        model.add(Dense(vocab_length))
+        model.add(Activation(activation))
+        model.compile(loss=loss, optimizer=opt, metrics=metrics)
+        return model
 
-    def make_model(self, units=256, rate=0.2, activation='sigmoid',
-                   loss='mean_squared_error', metrics=['acc'],
-                   opt='rmsprop'):
-        self.model = Sequential()
-        # self.model.add(LSTM(units, return_sequences=True, input_shape=(self.sequence_length, self.vocab_length)))
-        self.model.add(Dropout(rate))
-        self.model.add(LSTM(units, return_sequences=True, input_shape=(self.sequence_length, 3)))
-        self.model.add(LSTM(units, return_sequences=False))
-        self.model.add(Dropout(rate))
-        # self.model.add(Dense(self.vocab_length))
-        self.model.add(Dense(3))
-        self.model.add(Activation(activation))
-        self.model.compile(loss=loss, optimizer=opt, metrics=metrics)
-        print('Model is compiled. Units: {}. Dropout rate: {}. Activation: {}. Loss: {}. Metrics: {}. Opt: {}'.format(
-            units, rate, activation, loss, metrics, opt
-        ))
+    def train(
+            self,
+            units=256,
+            rate=0.2,
+            activation='softmax',
+            loss='categorical_crossentropy',
+            metrics=['acc'],
+            opt='rmsprop',
+            batch_size=4,
+            nb_epoch=400):
+        self.notes_model = self.__lstm__(self.sequence_length,
+                                         len(set(self.notes)),
+                                         units=units,
+                                         rate=rate,
+                                         activation=activation,
+                                         loss=loss,
+                                         metrics=metrics,
+                                         opt=opt)
+        self.durations_model = self.__lstm__(self.sequence_length,
+                                             len(set(self.durations)),
+                                             units=units,
+                                             rate=rate,
+                                             activation=activation,
+                                             loss=loss,
+                                             metrics=metrics,
+                                             opt=opt)
+        self.offsets_model = self.__lstm__(self.sequence_length,
+                                           len(set(self.offsets)),
+                                           units=units,
+                                           rate=rate,
+                                           activation=activation,
+                                           loss=loss,
+                                           metrics=metrics,
+                                           opt=opt)
+        self.velocities_model = self.__lstm__(self.sequence_length,
+                                              len(set(self.velocities)),
+                                              units=units,
+                                              rate=rate,
+                                              activation=activation,
+                                              loss=loss,
+                                              metrics=metrics,
+                                              opt=opt)
+        notes_history = self.notes_model.fit(self.input_notes, self.output_notes, batch_size=batch_size,
+                                             nb_epoch=nb_epoch)
+        durations_history = self.durations_model.fit(self.input_durations, self.output_durations, batch_size=batch_size,
+                                                     nb_epoch=nb_epoch)
+        offsets_history = self.offsets_model.fit(self.input_offsets, self.output_offsets, batch_size=batch_size,
+                                                 nb_epoch=nb_epoch)
+        velocities_history = self.velocities_model.fit(self.input_velocites, self.output_velocities,
+                                                       batch_size=batch_size, nb_epoch=nb_epoch)
+        return durations_history, offsets_history, notes_history, velocities_history
 
-    def train_model(self, input_notes, output_notes, batch_size=4, nb_epoch=400):
-        return self.model.fit(input_notes, output_notes, batch_size=batch_size, nb_epoch=nb_epoch)
-
-    def generate_midi(self, input_notes, notes_nb=16, destination='rnn_music', instrumentName='Piano', bars=0):
-        # Make a dictionary going backwards (with index as key and the note as the value)
-        backward_dict = dict()
-        for n in self.note_dict.keys():
-            index = self.note_dict[n]
-            backward_dict[index] = n
-
-        # pick a random sequence from the input as a starting point for the prediction
-        n = np.random.randint(0, len(input_notes) - 1)
-        sequence = input_notes[n]
-
-        # start_sequence = sequence.reshape(1, self.sequence_length, self.vocab_length)
-        start_sequence = sequence.reshape(1, self.sequence_length, 3)
-        # print(start_sequence)
+    @staticmethod
+    def __predict__(notes_nb, model, start_sequence, dict_len, sequence_length):
         output = []
-
-        # Let's generate a song of notes_nb notes
         for i in range(0, notes_nb):
-            new_note = self.model.predict(start_sequence, verbose=0)
+            new_value = model.predict(start_sequence, verbose=0)
             # Get the position with the highest probability
-            # index = np.argmax(new_note)
-            # encoded_note = np.zeros((self.vocab_length))
-            # encoded_note[index] = np.max(new_note)
-            # output.append(encoded_note)
-            # sequence = start_sequence[0][1:]
-            # start_sequence = np.concatenate((sequence, encoded_note.reshape(1, self.vocab_length)))
-            # start_sequence = start_sequence.reshape(1, self.sequence_length, self.vocab_length)
-            # print(new_note[0])
-            output.append(new_note[0])
+            index = np.argmax(new_value)
+            encoded_value = np.zeros(dict_len)
+            encoded_value[index] = 1.0
+            output.append(encoded_value)
             sequence = start_sequence[0][1:]
-            start_sequence = np.concatenate((sequence, new_note.reshape(1, 3)))
-            start_sequence = start_sequence.reshape(1, self.sequence_length, 3)
-        # Now output is populated with notes in their string form
-        # for element in output:
-        #     print(element)
-        max_duration = max(self.durations)
+            start_sequence = np.concatenate((sequence, encoded_value.reshape(1, dict_len)))
+            start_sequence = start_sequence.reshape(1, sequence_length, dict_len)
+        return output
+
+    def generate_midi(self, notes_nb=16, destination='rnn_music', instrumentName='Piano', bars=0):
+        # Make dictionaries going backwards (with index as key and the note as the value)
+        notes_backward_dict = self.__backward_dict_from_list__(self.notes)
+        durations_backward_dict = self.__backward_dict_from_list__(self.durations)
+        offsets_backward_dict = self.__backward_dict_from_list__(self.offsets)
+        velocities_backward_dict = self.__backward_dict_from_list__(self.velocities)
+
+        notes_dict_len = len(notes_backward_dict)
+        durations_dict_len = len(durations_backward_dict)
+        offsets_dict_len = len(offsets_backward_dict)
+        velocities_dict_len = len(velocities_backward_dict)
+
+        # pick random sequences from the input as a starting point for the prediction
+        n = np.random.randint(0, len(self.input_notes) - 1)
+        notes_sequence = self.input_notes[n]
+        durations_sequence = self.input_durations[n]
+        offsets_sequence = self.input_offsets[n]
+        velocities_sequence = self.input_velocites[n]
+
+        notes_start_sequence = notes_sequence.reshape(1, self.sequence_length, notes_dict_len)
+        durations_start_sequence = durations_sequence.reshape(1, self.sequence_length, durations_dict_len)
+        offsets_start_sequence = offsets_sequence.reshape(1, self.sequence_length, offsets_dict_len)
+        velocities_start_sequence = velocities_sequence.reshape(1, self.sequence_length, velocities_dict_len)
+        # print(start_sequence)
+        notes_output = self.__predict__(notes_nb, self.notes_model, notes_start_sequence, notes_dict_len, self.sequence_length)
+        durations_output = self.__predict__(notes_nb, self.durations_model, durations_start_sequence, durations_dict_len, self.sequence_length)
+        offsets_output = self.__predict__(notes_nb, self.offsets_model, offsets_start_sequence, offsets_dict_len, self.sequence_length)
+        velocities_output = self.__predict__(notes_nb, self.velocities_model, velocities_start_sequence, velocities_dict_len, self.sequence_length)
+
         final_notes = []
         final_durations = []
         final_velocities = []
-        for element in output:
-            # index = list(element).index(1)
-            # index = np.argmax(list(element))
-            # final_notes.append(backward_dict[index])
-            # final_durations.append(self.get_closest_value(self.fractions, np.max(list(element))))
-            final_notes.append(backward_dict[round(element[0] * (self.vocab_length - 1))])
-            final_durations.append(self.get_closest_value(arr=self.fractions, target=(element[1] * max_duration)))
-            final_velocities.append(element[2])
+        final_offsets = []
+        for n, d, o, v in zip(notes_output, durations_output, offsets_output, velocities_output):
+            final_notes.append(notes_backward_dict[list(n).index(1)])
+            final_durations.append(durations_backward_dict[list(d).index(1)])
+            final_offsets.append(offsets_backward_dict[list(o).index(1)])
+            final_velocities.append(velocities_backward_dict[list(v).index(1)])
 
         print("File: output/{}.mid: ".format(destination))
         print("\tNotes: {}".format(final_notes))
         print("\tDurations: {}".format(final_durations))
+        print("\tOffsets: {}".format(final_offsets))
         print("\tVelocities: {}".format(final_velocities))
 
-        offset = 0
+        total_offset = 0
         output_notes = []
         total_duration = sum(final_durations)
         midi_instrument = getattr(instrument, instrumentName)
         output_notes.append(midi_instrument())
 
         # create note and chord objects based on the values generated by the model
-        for pattern, duration, velocity in zip(final_notes, final_durations, final_velocities):
+        for pattern, duration, offset, velocity in zip(final_notes, final_durations, final_offsets, final_velocities):
             mapped_duration = (4 * bars * duration / total_duration) if (bars > 0) else (duration)
             # pattern is a chord
             if ('.' in pattern) or pattern.isdigit():
@@ -225,72 +282,78 @@ class AnnMidiProcessor:
                     notes.append(new_note)
                 new_chord = chord.Chord(notes)
                 new_chord.quarterLength = mapped_duration
-                new_chord.volume.velocityScalar = velocity
-                new_chord.offset = offset
+                new_chord.volume.velocity = velocity
+                new_chord.offset = total_offset
                 output_notes.append(new_chord)
             # pattern is a rest
             elif pattern == 'R':
                 new_note = note.Rest()
-                new_note.offset = offset
+                new_note.offset = total_offset
                 new_note.quarterLength = mapped_duration
                 new_note.storedInstrument = midi_instrument()
                 output_notes.append(new_note)
             # pattern is a note
             else:
                 new_note = note.Note(pattern)
-                new_note.offset = offset
+                new_note.offset = total_offset
                 new_note.quarterLength = mapped_duration
-                new_note.volume.velocityScalar = velocity
+                new_note.volume.velocity = velocity
                 new_note.storedInstrument = midi_instrument()
                 output_notes.append(new_note)
 
             # increase offset each iteration so that notes do not stack
-            offset += mapped_duration
+            total_offset += offset
 
         midi_stream = stream.Stream(output_notes)
 
         midi_stream.write('midi', fp="output/{}.mid".format(destination))
 
-    def save_model(self, input_notes, output_notes, file_name="model/model"):
+    @staticmethod
+    def __save_model__(model, name_pattern):
         # serialize model to JSON
-        model_json = self.model.to_json()
-        with open(file_name + ".json", "w") as json_file:
+        model_json = model.to_json()
+        with open(name_pattern + ".json", "w") as json_file:
             json_file.write(model_json)
-        # serialize weights to HDF5
-        self.model.save_weights(file_name + ".h5")
-        np.save(file_name + "_input", input_notes)
-        np.save(file_name + "_output", output_notes)
-        self.save_obj(self.pitches, 'pitches')
-        self.save_obj(self.fractions, 'fractions')
-        self.save_obj(self.durations, 'durations')
-        print("ANN model is saved to disk: {} {} {} {}".format(file_name + ".json", file_name + ".h5",
-                                                               file_name + ".input", file_name + ".output"))
 
-    def load_model(self, file_name="model/model", loss='mean_squared_error',
-                   metrics=['acc'], opt='rmsprop'):
+        # serialize weights to HDF5
+        model.save_weights(name_pattern + ".h5")
+
+    def save_model(self, dir_name="model"):
+        self.__save_model__(self.notes_model, os.path.join(dir_name, 'notes_model'))
+        self.__save_model__(self.durations_model, os.path.join(dir_name, 'durations_model'))
+        self.__save_model__(self.offsets_model, os.path.join(dir_name, 'offsets_model'))
+        self.__save_model__(self.velocities_model, os.path.join(dir_name, 'velocities_model'))
+        self.save_obj(self.notes, 'notes')
+        self.save_obj(self.durations, 'durations')
+        self.save_obj(self.offsets, 'offsets')
+        self.save_obj(self.velocities, 'velocities')
+
+    @staticmethod
+    def __load_model__(name_pattern, loss='mean_squared_error', metrics=['acc'], opt='rmsprop'):
         # load json and create model
-        json_file = open(file_name + ".json", 'r')
+        json_file = open(name_pattern + ".json", 'r')
         loaded_model_json = json_file.read()
         json_file.close()
-        self.model = model_from_json(loaded_model_json)
+        model = model_from_json(loaded_model_json)
         # load weights into new model
-        self.model.load_weights(file_name + ".h5")
-        self.model.compile(loss=loss, optimizer=opt, metrics=metrics)
-        input_notes = np.load(file_name + "_input.npy")
-        output_notes = np.load(file_name + "_output.npy")
+        model.load_weights(name_pattern + ".h5")
+        model.compile(loss=loss, optimizer=opt, metrics=metrics)
+        return model
 
-        self.pitches = self.load_obj('pitches')
-        self.fractions = self.load_obj('fractions')
+    def load_model(self, dir_name="model", loss='mean_squared_error',
+                   metrics=['acc'], opt='rmsprop'):
+        self.notes_model = self.__load_model__(os.path.join(dir_name, 'notes_model'), loss, metrics, opt)
+        self.durations_model = self.__load_model__(os.path.join(dir_name, 'durations_model'), loss, metrics, opt)
+        self.offsets_model = self.__load_model__(os.path.join(dir_name, 'offsets_model'), loss, metrics, opt)
+        self.velocities_model = self.__load_model__(os.path.join(dir_name, 'velocities_model'), loss, metrics, opt)
+
+        self.notes = self.load_obj('notes')
         self.durations = self.load_obj('durations')
-        print(self.fractions)
-        for i, note in enumerate(self.pitches):
-            self.note_dict[note] = i
+        self.offsets = self.load_obj('offsets')
+        print(self.offsets)
+        self.velocities = self.load_obj('velocities')
 
-        self.vocab_length = len(self.pitches)
-
-        print("ANN model is loaded from disk: {} {} {} {}".format(file_name + ".json", file_name + ".h5",
-                                                                  file_name + ".input", file_name + ".output"))
-        return input_notes, output_notes
+        self.construct_sequences()
 
     @staticmethod
     def get_closest_value(arr, target):
